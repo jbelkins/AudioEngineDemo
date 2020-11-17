@@ -8,9 +8,11 @@
 import Foundation
 
 
+// A simple property wrapper for a value that may be
+// safely accessed from multiple threads.
 @propertyWrapper
 public class Synchronized<T> {
-    private var accessQueue = DispatchQueue(label: "com.jbelkins.Synchronized<\(T.self)>")
+    private var accessQueue = DispatchQueue(label: "com.jbelkins.Synchronized<\(T.self)>", qos: .userInteractive)
     private var _wrappedValue: T?
 
     public init(wrappedValue: T) {
@@ -28,11 +30,5 @@ public class Synchronized<T> {
                 _wrappedValue = newValue
             }
         }
-    }
-
-    public var projectedValue: Synchronized<T> { self }
-
-    public func mutate(_ block: (inout T) -> Void) {
-        block(&_wrappedValue!)
     }
 }
