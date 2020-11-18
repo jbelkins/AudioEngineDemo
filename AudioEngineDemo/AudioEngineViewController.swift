@@ -78,7 +78,6 @@ class AudioEngineViewController: UITableViewController {
         do {
             try session.setCategory(.playAndRecord)
             try session.setMode(.default)
-            try session.setPreferredInputNumberOfChannels(1)
             try session.setActive(true)
         } catch {
             presentError(error)
@@ -218,6 +217,7 @@ class AudioEngineViewController: UITableViewController {
         setBPM()
         setSinewaveVolume()
         setMetronomeVolume()
+        recordingMixerNode.outputVolume = 1.0
     }
 
     private func startEngine() {
@@ -271,7 +271,9 @@ class AudioEngineViewController: UITableViewController {
     // Create a sink node to take audio input and expose it to us as data
     private func setupSinkNode(inputFormat: AVAudioFormat) {
         // Create a 30 second recording buffer to record audio data sent
-        // into the sink
+        // into the sink.  Note that there is no safety check to ensure
+        // recordings do not exceeed the size of the buffer, so don't
+        // record more than 30 seconds.
         recordingBuffer = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: AVAudioFrameCount(inputFormat.sampleRate * 30))!
         recordingBuffer.frameLength = 0
 
@@ -286,12 +288,16 @@ class AudioEngineViewController: UITableViewController {
             withUnsafePointer(to: self.recordingBuffer.audioBufferList.pointee.mBuffers) { recordingAudioBufferArrayPtr in
                 withUnsafePointer(to: audioBufferList.pointee.mBuffers) { sourceAudioBufferArrayPtr in
                     for i in 0..<1 {
-                        let recordingAudioBuffer = (recordingAudioBufferArrayPtr + i)
-                        let sourceAudioBuffer = (sourceAudioBufferArrayPtr + i)
-                        recordingAudioBuffer.pointee.mData!.advanced(by: Int(recordingAudioBuffer.pointee.mDataByteSize)).copyMemory(from: sourceAudioBuffer.pointee.mData!, byteCount: Int(sourceAudioBuffer.pointee.mDataByteSize))
+                        let recordingAudioBufferPtr = (recordingAudioBufferArrayPtr + i)
+                        let sourceAudioBufferPtr = (sourceAudioBufferArrayPtr + i)
+                        let sourceDataPtr = sourceAudioBufferPtr.pointee.mData!
+                        let destinationDataPtr = recordingAudioBufferPtr.pointee.mData!.advanced(by: Int(recordingAudioBufferPtr.pointee.mDataByteSize))
+                        let bytesToCopy = Int(sourceAudioBufferPtr.pointee.mDataByteSize)
+                        destinationDataPtr.copyMemory(from: sourceDataPtr, byteCount: bytesToCopy)
                     }
                 }
             }
+
             // Advance the frame length of the buffer since it now contains
             // additional data.
             self.recordingBuffer.frameLength += audioFrameCount
@@ -329,7 +335,7 @@ class AudioEngineViewController: UITableViewController {
         metronomeBase += 60 * framesPerSecond / AVAudioFramePosition(bpm)
 
         // Create a new player time for the start of the next click,
-        // and start the player.
+        // and schedule the next tick to happen at that time.
         let startTime = AVAudioTime(sampleTime: metronomeBase, atRate: tickFile.fileFormat.sampleRate)
         self.metronomePlayerNode.scheduleFile(tickFile, at: startTime, completionHandler: { [weak self] in
             // Once a tick finishes playing, call this func again
@@ -338,7 +344,7 @@ class AudioEngineViewController: UITableViewController {
         })
     }
 
-    // Show the user an error message.
+    // Show the user an error message if one is thrown.
     private func presentError(_ error: Error) {
         let alert = UIAlertController(title: "Error", message: error.localizedDescription, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .cancel, handler: nil))
